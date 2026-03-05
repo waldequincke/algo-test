@@ -1,0 +1,16 @@
+services:
+  algo-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: algo-service-corretto
+    ports:
+      - "8080:8080"
+    environment:
+      - QUARKUS_PROFILE=prod
+      - JAVA_OPTS="-Xms512m -Xmx512m"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/q/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3

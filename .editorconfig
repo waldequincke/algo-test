@@ -1,0 +1,44 @@
+# This is the top-most EditorConfig file
+root = true
+
+# Global defaults for all files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# --- JVM Languages (Java & Kotlin) ---
+[*.{java,kt,kts}]
+indent_size = 4
+
+# --- Build, Data & Config ---
+[*.{xml,yml,yaml,gradle,json,toml}]
+indent_size = 2
+
+# --- Docker & Shell Scripts ---
+# (Crucial for scripts to run correctly in Linux containers)
+[Dockerfile]
+indent_size = 4
+
+[*.sh]
+end_of_line = lf
+indent_size = 2
+
+# --- Database & API Definitions ---
+[*.sql]
+indent_size = 4
+
+[*.proto]
+indent_size = 2
+
+# --- Properties & Env Files ---
+[*.{properties,env}]
+indent_size = 4
+
+# --- Documentation ---
+[*.md]
+# Markdown uses two spaces at the end of a line for a manual line break
+trim_trailing_whitespace = false

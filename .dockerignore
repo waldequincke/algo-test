@@ -1,0 +1,6 @@
+# Only ignore these
+.gradle/
+build/
+bin/
+.quarkus/
+target/
