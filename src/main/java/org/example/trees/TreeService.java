@@ -12,7 +12,8 @@ import java.util.Queue;
 @ApplicationScoped
 public class TreeService {
     private static final Logger LOG = Logger.getLogger(TreeService.class);
-    private static final int MAX_DEPTH = 500; // Security constraint
+    private static final int MAX_DEPTH = 500;        // Security constraint: max tree levels
+    private static final int MAX_NODES = 10_000;     // Security constraint: max total nodes (prevents wide-tree DoS)
 
     /**
      * Performs a level-order traversal (BFS) of a binary tree.
@@ -31,15 +32,21 @@ public class TreeService {
         List<List<Integer>> result = new ArrayList<>();
         Queue<TreeNode> queue = new ArrayDeque<>();
         queue.add(root);
+        int totalNodes = 0;
 
         while (!queue.isEmpty()) {
-            int currentDepth = result.size();
-            if (currentDepth > MAX_DEPTH) {
+            if (result.size() >= MAX_DEPTH) {
                 LOG.error("Tree depth exceeded maximum limit");
                 throw new TreeProcessingException("Tree depth exceeds security limits (Max: " + MAX_DEPTH + ")");
             }
 
             int levelSize = queue.size();
+            totalNodes += levelSize;
+            if (totalNodes > MAX_NODES) {
+                LOG.error("Tree node count exceeded maximum limit");
+                throw new TreeProcessingException("Tree node count exceeds security limits (Max: " + MAX_NODES + ")");
+            }
+
             List<Integer> currentLevel = new ArrayList<>(levelSize);
 
             for (int i = 0; i < levelSize; i++) {
@@ -51,7 +58,7 @@ public class TreeService {
             result.add(List.copyOf(currentLevel));
         }
 
-        LOG.debugf("Traversal completed. Processed %d levels.", result.size());
+        LOG.debugf("Traversal completed. Processed %d levels, %d nodes.", result.size(), totalNodes);
         return List.copyOf(result);
     }
 }

@@ -24,12 +24,16 @@ sub-millisecond processing and cloud-native scalability.
 
 This service implements a multi-layered security strategy to prevent **Recursive Denial of Service (DoS)** attacks:
 
-1. **Parser Level (Jackson):** The infrastructure layer limits JSON nesting to 1,000 levels via
-   `StreamWriteConstraints`, preventing StackOverflows during the initial parsing phase.
-2. **Application Level (Business Logic):** A configurable depth-limit validation in the `TreeService` ensures that even
-   validly-parsed trees do not exceed business constraints before processing.
-3. **Heap Protection:** By using **Java 25 Records**, we minimize object header overhead, allowing for larger trees to
-   be processed in memory compared to standard POJOs.
+1. **Parser Level (Jackson — `JacksonSecurityCustomizer`):** The infrastructure layer limits JSON nesting to 1,000
+   levels via `StreamReadConstraints`, rejecting malicious payloads before a single byte of business logic runs.
+2. **Application Level — Depth (Business Logic):** `TreeService` rejects trees exceeding 500 levels (`MAX_DEPTH`),
+   enforced via `result.size() >= MAX_DEPTH` inside the BFS loop.
+3. **Application Level — Node Count (Business Logic):** `TreeService` rejects trees exceeding 10,000 total nodes
+   (`MAX_NODES`), preventing wide-tree DoS that a depth check alone cannot catch (a 17-level balanced BST already
+   holds ~130k nodes).
+4. **Heap Protection:** By using **Java 25 Records** with `-XX:+UseCompactObjectHeaders`, each node costs ~24 bytes
+   vs ~32 bytes for a standard POJO. At the 10k-node ceiling this keeps per-request allocation under ~500 KB,
+   well within the 512 MB heap and safe under high concurrency.
 
 ---
 
@@ -89,7 +93,32 @@ graph TD
 ## 🧠 BFS Implementation & Virtual Thread Efficiency
 
 <details>
-<summary><b>🔍 View TreeResource & TreeService Implementation</b></summary>
+<summary><b>🔍 View Layer 1 — JacksonSecurityCustomizer (Parser-level DoS Guard)</b></summary>
+
+```java
+/**
+ * Layer 1 — rejects JSON payloads nested beyond 1,000 levels at the parser,
+ * before any business logic runs.
+ */
+@Singleton
+public class JacksonSecurityCustomizer implements ObjectMapperCustomizer {
+
+    private static final int MAX_JSON_NESTING_DEPTH = 1000;
+
+    @Override
+    public void customize(ObjectMapper mapper) {
+        mapper.getFactory().setStreamReadConstraints(
+            StreamReadConstraints.builder()
+                .maxNestingDepth(MAX_JSON_NESTING_DEPTH)
+                .build()
+        );
+    }
+}
+```
+</details>
+
+<details>
+<summary><b>🔍 View TreeResource & TreeService Implementation (Single-Pass BFS)</b></summary>
 
 ```java
 /**
@@ -118,49 +147,46 @@ public class TreeResource {
 }
 
 /**
- * Service: Handles Security & BFS Logic
+ * Service: Single-pass BFS with inline depth and node-count guards.
+ * Both security checks are integrated into the BFS pass — no separate recursive
+ * pre-check — eliminating the double O(N) traversal and the risk of a
+ * StackOverflowError inside the validator itself.
  */
 @ApplicationScoped
 public class TreeService {
-    private static final int MAX_DEPTH = 500;
+    private static final int MAX_DEPTH = 500;       // max tree levels
+    private static final int MAX_NODES = 10_000;    // max total nodes (prevents wide-tree DoS)
 
     public List<List<Integer>> solveLevelOrder(TreeNode root) {
-        validateTreeDepth(root, 0); // Defensive Security Check
-        return performTransversal(root);
-    }
+        if (root == null) return List.of();
 
-    private void validateTreeDepth(TreeNode node, int depth) {
-        if (node == null) return;
-        if (depth > MAX_DEPTH) {
-            throw new TreeProcessingException("Tree depth exceeds security limits (Max: " + MAX_DEPTH + ")");
-        }
-        validateTreeDepth(node.left(), depth + 1);
-        validateTreeDepth(node.right(), depth + 1);
-    }
+        List<List<Integer>> result = new ArrayList<>();
+        Queue<TreeNode> queue = new ArrayDeque<>();
+        queue.add(root);
+        int totalNodes = 0;
 
-    private List<List<Integer>> performTransversal(TreeNode root) {
-        return switch (root) {
-            case null -> List.of();
-            default -> {
-                List<List<Integer>> result = new ArrayList<>();
-                Queue<TreeNode> queue = new ArrayDeque<>();
-                queue.add(root);
-
-                while (!queue.isEmpty()) {
-                    int levelSize = queue.size();
-                    List<Integer> currentLevel = new ArrayList<>(levelSize);
-
-                    for (int i = 0; i < levelSize; i++) {
-                        TreeNode node = queue.poll();
-                        currentLevel.add(node.value());
-                        if (node.left() != null) queue.add(node.left());
-                        if (node.right() != null) queue.add(node.right());
-                    }
-                    result.add(List.copyOf(currentLevel));
-                }
-                yield List.copyOf(result);
+        while (!queue.isEmpty()) {
+            if (result.size() >= MAX_DEPTH) {
+                throw new TreeProcessingException("Tree depth exceeds security limits (Max: " + MAX_DEPTH + ")");
             }
-        };
+
+            int levelSize = queue.size();
+            totalNodes += levelSize;
+            if (totalNodes > MAX_NODES) {
+                throw new TreeProcessingException("Tree node count exceeds security limits (Max: " + MAX_NODES + ")");
+            }
+
+            List<Integer> currentLevel = new ArrayList<>(levelSize);
+
+            for (int i = 0; i < levelSize; i++) {
+                TreeNode node = queue.poll();
+                currentLevel.add(node.value());
+                if (node.left() != null) queue.add(node.left());
+                if (node.right() != null) queue.add(node.right());
+            }
+            result.add(List.copyOf(currentLevel));
+        }
+        return List.copyOf(result);
     }
 }
 ```
@@ -168,12 +194,16 @@ public class TreeService {
 The core of this service is a high-performance **Level-Order Traversal (BFS)** algorithm, specifically optimized
 to leverage the breakthrough concurrency features of the modern JVM.
 
-### 1. The Algorithm: Iterative Breadth-First Search
-To ensure maximum reliability and predictable memory usage, the service employs an iterative BFS approach for tree traversal.
+### 1. The Algorithm: Single-Pass Iterative BFS
+The service uses a single-pass iterative BFS that integrates the security depth-check into the traversal loop,
+eliminating the previous two-phase design (separate recursive validator + traversal).
 * **Logic:** Discovery is managed via a `java.util.ArrayDeque`, acting as a FIFO queue to process nodes level-by-level.
 * **Complexity:** Achieves a time complexity of $O(N)$ and space complexity of $O(W)$, where $W$ is the maximum width of the tree.
-* **Stack Safety:** Unlike Depth-First Search (DFS), this iterative approach eliminates the risk of `StackOverflowError`
-  on extremely deep or unbalanced trees.
+* **Stack Safety:** The iterative approach eliminates `StackOverflowError` on deep or unbalanced trees — including inside
+  the depth validator itself, which was a risk with the previous recursive pre-check.
+* **Single-Pass Optimization:** Both the depth check (`result.size() >= MAX_DEPTH`) and the node-count check
+  (`totalNodes > MAX_NODES`) are evaluated per BFS level, removing the prior double $O(N)$ traversal cost and
+  closing the wide-tree DoS gap that depth alone cannot address.
 
 ### 2. Concurrency Model: Project Loom (Virtual Threads)
 By utilizing the `@RunOnVirtualThread` annotation, the service decouples HTTP request handling from expensive OS threads.
@@ -208,7 +238,8 @@ X-Runtime-Nanoseconds: 124050
 
 * **Runtime:** OpenJDK 25
 * **Framework:** Quarkus (RESTEasy Reactive)
-* **Testing:** RestAssured, JUnit 5, and Environment-based `.http` clients.
+* **Testing:** RestAssured, JUnit 5, and Environment-based `.http` clients. Test suite covers happy paths, edge cases
+  (leaf node, zero-value default, depth boundary), and negative paths (null body, malformed JSON, depth-exceeded).
 
 ---
 
