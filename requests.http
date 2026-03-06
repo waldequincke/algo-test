@@ -1,9 +1,6 @@
-// Note: Use IntelliJ Ultimate or VS Code REST Client extension to run these requests using the local environment.
-
 ### 1. Level Order Traversal
 # This uses the {{host}} variable from the environment file
-POST {{protocol}}://
-{{host}}/api/v1/trees/level-order
+POST {{protocol}}://{{host}}/api/v1/trees/level-order
 Content-Type: application/json
 
 {
@@ -20,5 +17,4 @@ Content-Type: application/json
 }
 
 ### 2. Health Check (Quarkus Default)
-GET {{protocol}}://
-{{host}}/q/health
+GET {{protocol}}://{{host}}/q/health
