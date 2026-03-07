@@ -26,11 +26,12 @@ This service implements a multi-layered security strategy to prevent **Recursive
 
 1. **Parser Level (Jackson — `JacksonSecurityCustomizer`):** The infrastructure layer limits JSON nesting to 1,000
    levels via `StreamReadConstraints`, rejecting malicious payloads before a single byte of business logic runs.
-2. **Application Level — Depth (Business Logic):** `TreeService` rejects trees exceeding 500 levels (`MAX_DEPTH`),
-   enforced via `result.size() >= MAX_DEPTH` inside the BFS loop.
+2. **Application Level — Depth (Business Logic):** `TreeService` rejects trees exceeding 500 levels (`tree.max-depth`),
+   enforced via `result.size() >= maxDepth` inside the BFS loop. Configurable at runtime via the `TREE_MAX_DEPTH`
+   environment variable (default: `500`).
 3. **Application Level — Node Count (Business Logic):** `TreeService` rejects trees exceeding 10,000 total nodes
-   (`MAX_NODES`), preventing wide-tree DoS that a depth check alone cannot catch (a 17-level balanced BST already
-   holds ~130k nodes).
+   (`tree.max-nodes`), preventing wide-tree DoS that a depth check alone cannot catch (a 17-level balanced BST already
+   holds ~130k nodes). Configurable at runtime via the `TREE_MAX_NODES` environment variable (default: `10000`).
 4. **Heap Protection:** By using **Java 25 Records** with `-XX:+UseCompactObjectHeaders`, each node costs ~24 bytes
    vs ~32 bytes for a standard POJO. At the 10k-node ceiling this keeps per-request allocation under ~500 KB,
    well within the 512 MB heap and safe under high concurrency.
@@ -154,8 +155,12 @@ public class TreeResource {
  */
 @ApplicationScoped
 public class TreeService {
-    private static final int MAX_DEPTH = 500;       // max tree levels
-    private static final int MAX_NODES = 10_000;    // max total nodes (prevents wide-tree DoS)
+
+    @ConfigProperty(name = "tree.max-depth", defaultValue = "500")
+    int maxDepth;   // Security constraint: max tree levels. Env: TREE_MAX_DEPTH
+
+    @ConfigProperty(name = "tree.max-nodes", defaultValue = "10000")
+    int maxNodes;   // Security constraint: max total nodes (prevents wide-tree DoS). Env: TREE_MAX_NODES
 
     public List<List<Integer>> solveLevelOrder(TreeNode root) {
         if (root == null) return List.of();
@@ -166,14 +171,14 @@ public class TreeService {
         int totalNodes = 0;
 
         while (!queue.isEmpty()) {
-            if (result.size() >= MAX_DEPTH) {
-                throw new TreeProcessingException("Tree depth exceeds security limits (Max: " + MAX_DEPTH + ")");
+            if (result.size() >= maxDepth) {
+                throw new TreeProcessingException("Tree depth exceeds security limits (Max: " + maxDepth + ")");
             }
 
             int levelSize = queue.size();
             totalNodes += levelSize;
-            if (totalNodes > MAX_NODES) {
-                throw new TreeProcessingException("Tree node count exceeds security limits (Max: " + MAX_NODES + ")");
+            if (totalNodes > maxNodes) {
+                throw new TreeProcessingException("Tree node count exceeds security limits (Max: " + maxNodes + ")");
             }
 
             List<Integer> currentLevel = new ArrayList<>(levelSize);
@@ -249,6 +254,20 @@ X-Runtime-Nanoseconds: 124050
 
 ```bash
 ./gradlew quarkusDev
+```
+
+### Configuration
+
+Security constraints are externalized via MicroProfile Config and can be overridden at runtime without recompilation:
+
+| Property | Environment Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `tree.max-depth` | `TREE_MAX_DEPTH` | `500` | Maximum tree depth (levels) before rejection |
+| `tree.max-nodes` | `TREE_MAX_NODES` | `10000` | Maximum total node count before rejection |
+
+```bash
+# Example: tighten limits for a resource-constrained deployment
+TREE_MAX_DEPTH=200 TREE_MAX_NODES=5000 ./gradlew quarkusDev
 ```
 
 ---
