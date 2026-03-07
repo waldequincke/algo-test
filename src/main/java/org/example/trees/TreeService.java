@@ -1,6 +1,7 @@
 package org.example.trees;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.example.infrastructure.TreeProcessingException;
 import org.jboss.logging.Logger;
 
@@ -12,8 +13,12 @@ import java.util.Queue;
 @ApplicationScoped
 public class TreeService {
     private static final Logger LOG = Logger.getLogger(TreeService.class);
-    private static final int MAX_DEPTH = 500;        // Security constraint: max tree levels
-    private static final int MAX_NODES = 10_000;     // Security constraint: max total nodes (prevents wide-tree DoS)
+
+    @ConfigProperty(name = "tree.max-depth", defaultValue = "500")
+    int maxDepth;   // Security constraint: max tree levels. Env: TREE_MAX_DEPTH
+
+    @ConfigProperty(name = "tree.max-nodes", defaultValue = "10000")
+    int maxNodes;   // Security constraint: max total nodes (prevents wide-tree DoS). Env: TREE_MAX_NODES
 
     /**
      * Performs a level-order traversal (BFS) of a binary tree.
@@ -35,16 +40,16 @@ public class TreeService {
         int totalNodes = 0;
 
         while (!queue.isEmpty()) {
-            if (result.size() >= MAX_DEPTH) {
+            if (result.size() >= maxDepth) {
                 LOG.error("Tree depth exceeded maximum limit");
-                throw new TreeProcessingException("Tree depth exceeds security limits (Max: " + MAX_DEPTH + ")");
+                throw new TreeProcessingException("Tree depth exceeds security limits (Max: " + maxDepth + ")");
             }
 
             int levelSize = queue.size();
             totalNodes += levelSize;
-            if (totalNodes > MAX_NODES) {
+            if (totalNodes > maxNodes) {
                 LOG.error("Tree node count exceeded maximum limit");
-                throw new TreeProcessingException("Tree node count exceeds security limits (Max: " + MAX_NODES + ")");
+                throw new TreeProcessingException("Tree node count exceeds security limits (Max: " + maxNodes + ")");
             }
 
             List<Integer> currentLevel = new ArrayList<>(levelSize);
