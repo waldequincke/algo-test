@@ -49,45 +49,54 @@ This service implements a multi-layered security strategy to prevent **Recursive
 * **Global Exception Mapping:** Standardized error responses via a centralized `ExceptionMapper` for consistent API
   behavior.
 
-### 🏗️ High-Level System Architecture
+### 🏗️ App Runner Infrastructure
 
 ```mermaid
-graph TD
-    subgraph Client_Layer [External Traffic]
-        User([Traffic Generator / Apache Benchmark])
+graph LR
+    subgraph Clients [Clients]
+        Mac["💻 External Client\n(~148ms RTT)"]
+        EC2["🖥️ EC2 same-region\n(~4ms RTT)"]
     end
 
-    subgraph AWS_Infrastructure [AWS App Runner Environment]
-        LB[Load Balancer]
-        
-        subgraph Scaling_Fleet [Horizontal Auto-Scaling Fleet]
-            Node1[Quarkus Instance 1]
-            Node2[Quarkus Instance 2]
-            Node3[Quarkus Instance 3]
+    subgraph AppRunner [AWS App Runner]
+        direction TB
+
+        subgraph Proxy [Envoy Proxy — TLS termination]
+            Envoy["Envoy\n⬛ Buffers up to N concurrent requests\n⬛ Concurrency threshold controls\n   how many reach the instance\n⬛ Excess requests queued here\n   → source of tail latency"]
         end
-        
-        Metrics[(AWS CloudWatch)]
+
+        subgraph Scaling [Auto-Scaling]
+            Scaler["App Runner Scaler\nTriggers when instance concurrency\nexceeds threshold (default: 100)"]
+        end
+
+        subgraph Fleet [Instance Fleet  —  min: 1, max: 25]
+            subgraph I1 [Instance 1  —  always warm]
+                VT1["🧵 Virtual Threads\n@RunOnVirtualThread"]
+                BFS1["⚡ BFS Algorithm\n37 µs · 0 allocations on hot path"]
+            end
+            subgraph I2 [Instance 2  —  cold start ~10s]
+                VT2["🧵 Virtual Threads"]
+                BFS2["⚡ BFS Algorithm"]
+            end
+        end
+
+        CW["📊 CloudWatch\nCPU · Memory · Concurrency\nLatency · 2xx / 4xx / 5xx"]
     end
 
-    subgraph JVM_Internals [Java 25 + Project Loom]
-        VT[Virtual Thread Pool]
-        Jackson[Security: Jackson Stream Constraints]
-        BFS[BFS Logic: Java Records]
-    end
-
-    %% Flow
-    User -->|HTTP POST| LB
-    LB -->|100% Load| Node1
-    Node1 -.->|Metrics Trigger| Metrics
-    Metrics -.->|Scale-out Signal| Scaling_Fleet
-    LB -->|Distributed Load| Node2
-    LB -->|Distributed Load| Node3
-
-    %% Inside Instance
-    Node1 --> Jackson
-    Jackson --> VT
-    VT --> BFS
+    Mac -->|"HTTPS POST ~19KB"| Envoy
+    EC2 -->|"HTTPS POST ~19KB"| Envoy
+    Envoy -->|"≤ threshold concurrent"| I1
+    Envoy -.->|"overflow queued"| I1
+    Envoy -->|"after scale-out"| I2
+    I1 -.->|metrics| CW
+    I2 -.->|metrics| CW
+    CW -.->|"concurrency > threshold\n→ scale-out signal"| Scaler
+    Scaler -.->|provisions| I2
+    VT1 --> BFS1
+    VT2 --> BFS2
 ```
+
+> **Key insight from benchmarking:** Envoy's buffering makes the instance appear underloaded to the scaler even under 250 concurrent connections — the instance only saw ~6 concurrent requests from an external client, vs 69.5 from EC2 in the same region.
 
 ---
 
@@ -221,11 +230,9 @@ The tree nodes and response objects are implemented as **Java 25 Records**.
 * **Immutable State:** Ensures that the BFS queue operations are inherently thread-safe and optimized for JIT (Just-In-Time) compilation.
 
 ### 4. Performance Paradox: "The Speed Bottleneck"
-A fascinating discovery during testing was the **"Too Fast to Scale"** phenomenon. Because the BFS algorithm executes in sub-millisecond time (`X-Runtime-Ms: ~0.12ms`), the system initially failed to scale at 20:20.
+A key discovery during benchmarking was that **Envoy (App Runner's proxy) queues requests before they reach the instance**, acting as a buffer. This means the App Runner auto-scaler observes only the requests that actively reach the instance — not the total concurrent connections. With the default concurrency threshold of 100, the single instance never appeared saturated to the scaler, even under 250 concurrent connections.
 
-The requests were so fast that they did not persist in the "Active Concurrency" queue long enough to trigger the AWS default threshold of 100. This led to the final architectural decision: **tuning the infrastructure to match the high velocity of the code.**
-
-**The Lesson:** "Fast code is invisible to slow infrastructure. To scale a sub-millisecond service, you must move from reactive scaling to sensitive scaling."
+**The Lesson:** "Fast code is invisible to slow infrastructure. When Envoy absorbs your burst, the scaler never sees it."
 
 ---
 
@@ -233,8 +240,9 @@ The requests were so fast that they did not persist in the "Active Concurrency" 
 
 Performance metrics are exposed directly in the HTTP headers to validate the sub-millisecond execution times:
 ```http
-X-Runtime-Ms: 0.124
-X-Runtime-Nanoseconds: 124050
+x-runtime-ms: 0.037
+x-runtime-nanoseconds: 37015
+x-envoy-upstream-service-time: 4
 ```
 
 ---
@@ -272,140 +280,11 @@ TREE_MAX_DEPTH=200 TREE_MAX_NODES=5000 ./gradlew quarkusDev
 
 ---
 
-## 📊 Performance & Cloud Scalability
+## 📊 Performance & Benchmarks
 
-This service is optimized for high-concurrency and low-latency traversal. The following benchmarks were conducted on the live production environment to validate the efficiency of the **Java 25 Virtual Threads** implementation.
+All benchmarks were executed against the live production deployment on **AWS App Runner (us-east-1)** using a **500-node balanced BST** (9 levels, ~19 KB JSON payload).
 
-### 1. Latency Breakdown (The "Request Journey")
-Even though the total round-trip time is ~150ms, the actual computational cost of the algorithm is negligible. This diagram illustrates where the time is spent:
-
-```mermaid
-gantt
-    title Request Latency Attribution (Single Request)
-    dateFormat  SSS
-    axisFormat  %Lms
-    section Network
-    Client to AWS (Uruguay -> USA) :000, 072
-    AWS to Client (USA -> Uruguay) :078, 150
-    section Infrastructure
-    Envoy Proxy / TLS Termination :072, 075
-    JSON Serialization/IO        :075, 078
-    section Logic
-    Level-Order Algorithm (JVM)   :076, 077
-```
-
-## 🧪 Case Study: Iterative Infrastructure Tuning
-
-Performance in a high-velocity Java environment is a "Handshake" between efficient code and sensitive infrastructure. 
-This section documents the evolution from a failing default configuration to a high-availability tuned system.
-
-### Phase 1: The "Invisible" Load (March 3, 20:20)
-**Configuration:** AWS Default (Concurrency Threshold = 100)
-
-Initially, despite hitting the service with a concurrency of 250 using `ab`, the infrastructure **failed to scale**.
-* **The Observation:** At **20:20**, the "Active Instances" graph remained flat at **1**.
-* **The Bottleneck:** Massive spikes in **4xx errors** (~2.7K) were observed as the single node became saturated.
-* **The Technical "Why":** Because the Java 25 Virtual Thread implementation is so efficient (sub-millisecond execution), 
-requests finished faster than the AWS Load Balancer could "count" them. We never reached the 100-concurrency threshold 
-required for the default auto-scaler to trigger.
-
-### Phase 2: The Pivot (The "SensitiveScaling" Policy)
-**Hypothesis:** To match the velocity of a low-latency JVM, the infrastructure sensitivity must be increased.
-* **Action:** Created a custom `SensitiveScaling` configuration with a **Max Concurrency threshold of 5**.
-* **Goal:** Force the infrastructure to recognize the "Pressure" of 80+ users before the compute node reaches a failure 
-state.
-
-### Phase 3: Successful Scale-Out (March 3, 20:50)
-
-```mermaid
-sequenceDiagram
-    participant U as User (Apache Benchmark)
-    participant LB as AWS Load Balancer
-    participant I1 as Instance 1 (Primary)
-    participant CW as CloudWatch Metrics
-    participant AR as App Runner Scaler
-    participant I2 as Instance 2 (New)
-
-    U->>LB: 250 Concurrent Requests
-    LB->>I1: Routes 100% Traffic
-    Note over I1: Virtual Threads process < 1ms
-    I1-->>CW: Reports Concurrency > 5
-    Note over CW: SensitiveScaling Threshold Breached
-    CW->>AR: Trigger Scale-Out
-    AR->>I2: Provisioning Instance
-    Note over I2: JVM Startup & Health Checks
-    LB->>I1: Traffic continues (Some 4xx/5xx)
-    I2-->>LB: Health Check Passed (20:51)
-    LB->>I1: Distributed Traffic
-    LB->>I2: Distributed Traffic
-    Note over I1,I2: System Recovery & Stability
-```
-
-**Configuration:** Tuned SensitiveScaling (Threshold = 5)
-
-Repeating the test at **20:49** yielded a completely different architectural response:
-
-| Timestamp | Metric | State |
-| :--- | :--- | :--- |
-| **20:49** | **CPU Spike** | Utilization hit **72.09%**. Scaling signal initiated. |
-| **20:50** | **Cold Start** | 3 transient 5xx errors (Provisioning lag & JIT warm-up period).|
-| **20:51** | **Recovery** | **Active Instances reached 3**. |
-| **20:51** | **Throughput** | Processed **10,587 successful 2xx requests** in 60 seconds. |
-
-### 📊 Unified Telemetry Dashboard
-
-#### 📈 1. The Load Profile (Total Ingress)
-Before analyzing the system response, it is critical to visualize the volume of traffic being injected into the cluster.
-
-![Total Ingress showing 13.5k Peak Requests](images/request-count.png)
-
-* **Total Volume:** The `request-count.png` shows a peak of **~13.5K total requests** hitting the load balancer.
-* **The Gap:** By comparing this "Total Request" graph with the "2xx Success" graph, we can visually identify the 
-"Loss Window" at 20:20 where the total requests remained high but successful responses dropped significantly due to 
-infrastructure saturation.
-
-#### 2. The Scaling Trigger & Resolution (Scaling Panel)
-*Comparison of the failed attempt (20:20) vs. the successful 3-node scale-out (20:51).*
-
-|                 CPU Saturation                 | Scaling Threshold Breach |              Active Instance Count               |
-|:----------------------------------------------:| :---: |:------------------------------------------------:|
-| ![CloudWatch Dashboard showing 72% CPU Saturation at 20:49](images/cpu-utilization.png) | ![CloudWatch Metrics showing Scaling Threshold Breach](images/concurrency.png) | ![Scale-out graph showing transition from 1 to 3 instances](images/active-instances.png) |
-
-#### 3. Traffic Reliability (Throughput Panel)
-*Visualizing the pivot from 4xx rejections to 2xx success.*
-
-|                Initial Rejections (4xx)                 |               Transient Scaling Lag (5xx)               |                High-Volume Success (2xx)                |
-|:-------------------------------------------------------:|:-------------------------------------------------------:|:-------------------------------------------------------:|
-| ![Saturation-induced 4xx Errors at 20:20](images/4xx-response-count.png) | ![Cold-start 5xx Errors during provisioning at 20:50](images/5xx-response-count.png) | ![Successful 2xx responses recovery at 20:51](images/2xx-response-count.png) |
-
-#### 4. Efficiency & Latency (Health Panel)
-*Evidence of the Project Loom efficiency and response time stability.*
-
-|                                                                      Memory Utilization (Flat 5%)                                                                      |                                                                   Latency Stability                                                                   |
-|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------------------------------------------------------:|
-|                                                          ![Flat 5% Memory Utilization under 10k/min load](images/memory-utilization.png)                                                          |                                                    ![Latency Stability graph under 3-instance load](images/request-latency.png)                                                     |
-| *Note that even during the 10k/min request peak at 20:51, Memory Utilization stayed under **5%**, validating the low overhead of Java 25 Records and Virtual Threads.* | *The massive peak at 20:51 confirms that the additional compute nodes successfully absorbed the load that was previously causing 4xx/5xx rejections.* |
-
----
-
-### 💡 Key Takeaways
-* **Observability is Mandatory:** Without the 20:20 data, the service would have crashed in production. The iterative 
-tuning proved that "Fast Code" requires "Fast Infrastructure."
-* **The "Cold Start" Window:** The 50x errors at 20:50 provide an honest look at the 60-second provisioning lag 
-in managed cloud environments, justifying the use of **Provisioned Concurrency** for mission-critical paths.
-
-## 🛠️ How to Reproduce These Benchmarks
-
-To verify the performance and auto-scaling capabilities of this service, you can run the following tests locally.
-
-### 1. Prerequisites
-You will need the Apache HTTP server benchmarking tool (`ab`) and `python3` (to generate the test payload).
-
-* **macOS:** `brew install ab`
-* **Linux:** `sudo apt-get install apache2-utils`
-
-### 2. Generate the Test Payload
-Create a balanced BST with 500 nodes to ensure the algorithm has significant work to do:
+### Test Payload
 
 ```bash
 python3 -c "
@@ -418,41 +297,176 @@ print(json.dumps(build_tree(1, 500)))
 " > heavy_tree.json
 ```
 
-### 3. Run the Stress Test
-Execute the following command to hit the API with 10,000 total requests and a concurrency level of 250:
-```bash
-ab -n 10000 -c 250 -k -p heavy_tree.json -T application/json https://zmptujuvph.us-east-1.awsapprunner.com/api/v1/trees/level-order
+### 1. Latency Breakdown (The "Request Journey")
+
+A single request confirms that the algorithm itself is not the bottleneck:
+
+```http
+x-runtime-nanoseconds: 37015        →  37 µs   (BFS algorithm)
+x-envoy-upstream-service-time: 4    →  4 ms    (Envoy proxy overhead)
+Total round-trip (Uruguay → us-east-1): ~148 ms (network)
 ```
 
-* **x-runtime-ms Header:** Inspect a single response to see the sub-millisecond execution time.
-```bash
-curl -i -X POST -H "Content-Type: application/json" -d @heavy_tree.json https://zmptujuvph.us-east-1.awsapprunner.com/api/v1/trees/level-order | grep x-runtime
+```mermaid
+gantt
+    title Request Latency Attribution (Single Request)
+    dateFormat  SSS
+    axisFormat  %Lms
+    section Network
+    Client to AWS (Uruguay → USA) :000, 072
+    AWS to Client (USA → Uruguay) :078, 148
+    section Infrastructure
+    Envoy Proxy / TLS              :072, 076
+    section Logic
+    BFS Algorithm (JVM)            :076, 077
 ```
-### 📈 Scalability Validation (Soak Test)
-To validate the Auto-Scaling logic, a sustained 3-minute soak test was performed.
 
-* **Payload:** 500-node Balanced BST (Heavy Tree)
-* **Duration:** 180 seconds
-* **Concurrency:** 80 (Targeting $16\times$ the scale-out threshold)
+### 2. Benchmark Results
 
-**Results:**
+All tests: `ab -n 10000 -k -p heavy_tree.json -T application/json <endpoint>`
 
-| Metric | Value |
+#### From the client machine (Uruguay → us-east-1)
+
+| Metric | c=250 (cold) | c=250 (warm) |
+| :--- | :--- | :--- |
+| **Req/s** | 179.28 | 179.74 |
+| **Failed** | 0 | 0 |
+| **p50** | 707 ms | 748 ms |
+| **p90** | 3,153 ms | 3,000 ms |
+| **p95** | 6,765 ms | 5,625 ms |
+| **p99** | 9,259 ms | 8,615 ms |
+
+The high tail latencies are caused by App Runner cold starts when scaling from 1 to 2–3 instances. The algorithm itself is not the bottleneck — Envoy buffers requests and passes only ~6 concurrent to the instance at peak, keeping CPU under 10%.
+
+#### From EC2 (same region, us-east-1) — eliminating network latency
+
+| Metric | c=250 | c=80 warm (1 instance) |
+| :--- | :--- | :--- |
+| **Req/s** | 272.49 | **297.66** |
+| **Failed** | 879 (cold starts) | **0** |
+| **p50** | 456 ms | **196 ms** |
+| **p90** | 1,289 ms | **437 ms** |
+| **p95** | 2,088 ms | **524 ms** |
+| **p99** | 7,134 ms | **912 ms** |
+
+With `c=80` (below the 100-concurrency threshold), a single warm instance handles the full load with 0 errors. This is the true capacity of one instance: **~300 req/s, p99 < 1s**, from within AWS.
+
+### 3. Key Findings
+
+| Finding | Detail |
 | :--- | :--- |
-| **Total Requests** | 30,000 |
-| **Success Rate** | 98.8% |
-| **P50 Latency** | 306ms |
-| **P90 Latency** | 404ms |
+| **Algorithm cost** | 37 µs — negligible at any scale |
+| **Real bottleneck** | Network (148 ms from Uruguay) and App Runner cold starts |
+| **Envoy behavior** | Buffers requests before the instance; scaler sees ~6 concurrent even under 250 connections |
+| **1 instance capacity** | ~300 req/s, p99 < 1s (from within AWS, warm JVM) |
+| **Scaling trigger** | Cold starts add 5–15s of tail latency while new instances provision |
 
-**Observation:** The stability of the P50 vs. P90 latency under sustained load confirms that the horizontal pod 
-autoscaling (HPA) effectively distributed traffic across a multi-instance fleet. The minimal failures observed occurred 
-during the initial "Cold Start" window (0-30s), after which the system reached a steady state.
+### 4. CloudWatch Dashboard
+
+All metrics captured from the live AWS App Runner service during today's benchmark session.
+
+#### Traffic Volume
+
+| Request Count (all tests) |
+|:---:|
+| ![Request count across all benchmark runs](images/request-count-overview.png) |
+| *Each spike corresponds to a benchmark run. Peak: ~12.3K requests/min during the EC2 test at 21:33.* |
+
+#### Response Codes
+
+| 2xx Success | 4xx Errors | 5xx Errors |
+|:---:|:---:|:---:|
+| ![HTTP 2xx response count](images/2xx-response-count.png) | ![HTTP 4xx response count](images/4xx-response-count.png) | ![HTTP 5xx response count — no data](images/5xx-response-count-zero.png) |
+| *Max 8.471K/min — successful responses across all runs.* | *2.871K errors concentrated in the `concurrency=5` App Runner config test (c=250). All other tests: 0 errors.* | *Zero 5xx errors throughout the entire session — no instance failures or crashes.* |
+
+#### Instance Scaling & Concurrency
+
+| Active Instances | Concurrency at Instance |
+|:---:|:---:|
+| ![Active instances — peaked at 2 during EC2 test](images/active-instances.png) | ![Concurrency — peaked at 69.5 during EC2 test](images/concurrency.png) |
+| *Peaked at 2 instances during the EC2 test. Mac tests kept a single instance active — Envoy absorbed the burst before it could trigger scale-out.* | *Peak of 69.5 concurrent requests reaching the instance during the EC2 test. From Mac, the same c=250 test showed only ~6 — confirming Envoy's buffering effect.* |
+
+#### Resource Utilization & Latency
+
+| CPU Utilization | Memory Utilization | Request Latency |
+|:---:|:---:|:---:|
+| ![CPU utilization — peaked at 70.72% during EC2 test](images/cpu-utilization.png) | ![Memory utilization — flat at 5.37% across all tests](images/memory-utilization.png) | ![Request latency — peaked at 724.5ms during EC2 test](images/request-latency.png) |
+| *Peak 70.72% during the EC2 test (c=80, warm). Mac tests barely registered — the instance was never truly stressed from outside AWS.* | *Flat at ~5.37% regardless of load. Validates the low memory overhead of Java 25 Records and Virtual Threads.* | *Peak 724.5ms during the EC2 test. The spike reflects the cold start of the second instance provisioned mid-test.* |
+
+---
+
+### 5. Infrastructure Tuning: Concurrency Threshold
+
+The App Runner `concurrency` setting controls how many concurrent requests Envoy forwards to each instance before triggering a scale-out. Lowering it causes Envoy to push more requests directly to the instance:
+
+| Concurrency setting | Observed max concurrency at instance | CPU at peak | Errors (c=250 test) |
+| :---: | :---: | :---: | :---: |
+| 100 (default) | 6 | < 10% | 0 |
+| 5 | 12 | 51.69% | 2,962 (29.6%) |
+
+**Conclusion:** The default threshold of 100 is optimal for this workload. Lowering it causes the instance to receive unqueued bursts it cannot absorb, resulting in rejections. The correct lever for eliminating cold starts is `min instances`, not the concurrency threshold.
+
+---
+
+## 🛠️ How to Reproduce
+
+### Prerequisites
+
+```bash
+# macOS
+brew install ab
+
+# Linux
+sudo apt-get install apache2-utils
+```
+
+### Run from local machine
+
+```bash
+# Generate payload
+python3 -c "
+import json
+def build_tree(s, e):
+    if s > e: return None
+    mid = (s + e) // 2
+    return {'value': mid, 'left': build_tree(s, mid - 1), 'right': build_tree(mid + 1, e)}
+print(json.dumps(build_tree(1, 500)))
+" > heavy_tree.json
+
+# Stress test
+ab -n 10000 -c 250 -k -p heavy_tree.json -T application/json \
+  https://zmptujuvph.us-east-1.awsapprunner.com/api/v1/trees/level-order
+
+# Inspect algorithm latency
+curl -i -X POST -H "Content-Type: application/json" -d @heavy_tree.json \
+  https://zmptujuvph.us-east-1.awsapprunner.com/api/v1/trees/level-order | grep x-runtime
+```
+
+### Run from EC2 (same region — measures true service capacity)
+
+```bash
+# Launch t3.medium in us-east-1, then:
+scp heavy_tree.json ec2-user@<ip>:~
+ssh ec2-user@<ip>
+
+sudo dnf install -y httpd-tools
+
+# Warmup
+ab -n 500 -c 50 -k -p heavy_tree.json -T application/json \
+  https://zmptujuvph.us-east-1.awsapprunner.com/api/v1/trees/level-order
+
+# Single instance test (stays under 100-concurrency threshold)
+ab -n 10000 -c 80 -k -p heavy_tree.json -T application/json \
+  https://zmptujuvph.us-east-1.awsapprunner.com/api/v1/trees/level-order
+```
+
+---
 
 ## 🏁 Conclusion & Future Roadmap
 
-This project successfully demonstrates that a modern Java 25 / Project Loom stack can handle massive throughput with negligible resource overhead. By tuning the infrastructure to match the sub-millisecond execution of the BFS algorithm, we achieved a self-healing system capable of 10k+ requests/minute.
+A Java 25 / Project Loom stack delivers **~300 req/s per instance with p99 < 1s** for this workload, with the algorithm consuming only 37 µs per request. The remaining latency is entirely infrastructure (network, TLS, Envoy, cold starts).
 
-### 🚀 Future Improvements:
-* **Provisioned Concurrency:** Implement a "Warm Pool" of 2 instances to eliminate the 60-second 5xx window seen at 20:50.
-* **GraalVM Native Image:** Compile to native code to further reduce "Cold Start" boot times from seconds to milliseconds.
-* **Distributed Tracing:** Integrate OpenTelemetry to visualize the BFS traversal path across larger distributed clusters.
+### Recommendations:
+* **`min instances = 2`:** Eliminates cold start tail latency under sustained load at zero code changes.
+* **GraalVM Native Image:** Reduces cold start time from ~10s to milliseconds for faster scale-out.
+* **Distributed Tracing:** OpenTelemetry integration to observe per-request BFS traversal times across instances.
