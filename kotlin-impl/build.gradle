@@ -1,0 +1,48 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+    id 'org.jetbrains.kotlin.plugin.allopen'
+    id 'io.quarkus'
+}
+
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+
+// Quarkus CDI requires open classes; allopen rewrites Kotlin's final-by-default at compile time
+allOpen {
+    annotation("jakarta.enterprise.context.ApplicationScoped")
+    annotation("jakarta.enterprise.context.RequestScoped")
+    annotation("jakarta.ws.rs.Path")
+    annotation("jakarta.inject.Singleton")
+    annotation("io.quarkus.test.junit.QuarkusTest")
+}
+
+dependencies {
+    implementation enforcedPlatform("${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}")
+    implementation 'io.quarkus:quarkus-kotlin'          // Kotlin + Jackson Kotlin module + coroutines Vert.x bridge
+    implementation 'io.quarkus:quarkus-rest-jackson'
+    implementation 'io.quarkus:quarkus-rest'            // RESTEasy Reactive: native suspend-function support
+    implementation 'io.quarkus:quarkus-arc'
+    implementation 'io.quarkus:quarkus-smallrye-health'
+    implementation 'io.quarkus:quarkus-smallrye-openapi'
+    // kotlinx-coroutines: version managed by Quarkus BOM
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core'
+    testImplementation 'io.quarkus:quarkus-junit5'
+    testImplementation 'io.rest-assured:rest-assured'
+}
+
+group = 'org.example'
+version = '1.0.0-SNAPSHOT'
+
+kotlin {
+    jvmToolchain(25)
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.fromTarget("25")
+        freeCompilerArgs.addAll(['-Xjsr305=strict'])
+    }
+}
+
+test {
+    systemProperty "java.util.logging.manager", "org.jboss.logmanager.LogManager"
+}
