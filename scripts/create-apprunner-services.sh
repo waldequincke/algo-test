@@ -124,7 +124,7 @@ create_service() {
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║     Create App Runner Services — Heptatlón               ║"
+echo "║     Create App Runner Services — Heptathlon              ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo "Account : ${AWS_ACCOUNT_ID}"
 echo "Region  : ${AWS_REGION}"

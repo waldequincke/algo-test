@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Heptatlón Combinado — Phase 1 + Phase 2 (intercalado por servicio)
-===================================================================
-Por cada servicio ejecuta en orden:
-  1. Phase 1 · Small Tree  — warmup completo → medición 90s @ 500 req/s
-  2. Phase 1 · Large Tree  — warmup completo → medición 90s @ 500 req/s
-  3. Phase 2 · Saturation  — step-up con Large Tree (servicio caliente)
+Combined Heptathlon — Phase 1 + Phase 2 (interleaved per service)
+==================================================================
+For each service, runs in order:
+  1. Phase 1 · Small Tree  — full warmup → 90s measurement @ 500 req/s
+  2. Phase 1 · Large Tree  — full warmup → 90s measurement @ 500 req/s
+  3. Phase 2 · Saturation  — step-up with Large Tree (service already hot)
 
-Esto garantiza que la saturación corre inmediatamente después del warmup
-del mismo servicio, evitando el scale-down de App Runner entre fases.
+This guarantees that saturation runs immediately after the warmup of the
+same service, avoiding App Runner's scale-down window between phases.
 
 Usage:
     python3 scripts/heptathlon.py
@@ -464,7 +464,7 @@ def main() -> None:
     est_total                = len(SERVICES) * total_per_service
 
     _sep()
-    print(f"  Heptatlón Combinado — Phase 1 + Phase 2 (intercalado por servicio)")
+    print(f"  Combined Heptathlon — Phase 1 + Phase 2 (interleaved per service)")
     _sep()
     print(f"  Services   : {len(SERVICES)}")
     print(f"  Rate       : {THROUGHPUT_RATE} req/s  (t={WRK_THREADS}, c={WRK_CONNECTIONS})")
@@ -587,7 +587,7 @@ def main() -> None:
             print(f"  {svc:<28} {int(best['rate']):>10}  {p99_str:>12}")
 
     elapsed = bench_end - bench_start
-    print(f"\n  Heptatlón completado en {int(elapsed.total_seconds() // 60)} min.")
+    print(f"\n  Heptathlon completed in {int(elapsed.total_seconds() // 60)} min.")
     _sep()
 
 

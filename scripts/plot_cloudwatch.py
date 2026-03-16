@@ -31,7 +31,7 @@ SCRIPT_DIR   = Path(__file__).parent.resolve()
 PROJECT_ROOT = SCRIPT_DIR.parent
 OUT_DIR      = PROJECT_ROOT / "images"
 
-# Default lookback when called standalone (covers full heptatlón + buffer)
+# Default lookback when called standalone (covers full heptathlon run + buffer)
 LOOKBACK_MINUTES = 120
 
 # Service names + IDs (both dimensions required by App Runner CloudWatch metrics)
