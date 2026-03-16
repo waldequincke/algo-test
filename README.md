@@ -460,5 +460,5 @@ graph LR
 
 ---
 
-**Author:** Waldemar Quincke
+**Author:** Waldemar Quincke · [LinkedIn](https://www.linkedin.com/in/waldemar-quincke/)
 

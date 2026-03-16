@@ -10,7 +10,7 @@ pluginManagement {
     id "org.jetbrains.kotlin.plugin.allopen"     version "${kotlinVersion}"
   }
 }
-rootProject.name = 'algo-test'
+rootProject.name = 'backend-performance-heptathlon'
 
 include 'java-impl'
 include 'kotlin-impl'
