@@ -1,6 +1,22 @@
-# Only ignore these
+# Gradle build outputs
 .gradle/
 build/
+java-impl/build/
+kotlin-impl/build/
 bin/
 .quarkus/
 target/
+
+# Node.js
+nodejs-impl/node_modules/
+nodejs-impl/dist/
+nodejs-wt-impl/node_modules/
+nodejs-wt-impl/dist/
+
+# Dev tooling — not needed in Docker image
+scripts/
+test-data/
+http/
+src/
+images/
+*.md

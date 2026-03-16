@@ -21,9 +21,7 @@ public class TreeService {
 
     /**
      * Performs a level-order traversal (BFS) of a binary tree.
-     * Depth validation is integrated into the BFS pass — no separate recursive
-     * pre-check — eliminating both the double O(N) traversal and the risk of a
-     * StackOverflowError inside the validator itself.
+     * Depth validation is integrated into the BFS pass.
      *
      * Primitive optimisation:
      *   {@code int[]} maps to JVM {@code int[]}: no per-element boxing during BFS.
@@ -71,10 +69,10 @@ public class TreeService {
         return result;
     }
 
-    /** Boxes a primitive int[] into an unmodifiable List<Integer> in a single pass. */
+    /** Boxes a primitive int[] into a List<Integer> in a single pass. */
     private static List<Integer> toIntegerList(int[] values) {
         List<Integer> list = new ArrayList<>(values.length);
         for (int v : values) list.add(v);
-        return List.copyOf(list);
+        return list;
     }
 }

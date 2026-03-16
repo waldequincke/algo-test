@@ -76,10 +76,10 @@ public class TreeService {
         return result;
     }
 
-    /** Boxes a primitive int[] into an unmodifiable List<Integer> in a single pass. */
+    /** Boxes a primitive int[] into a List<Integer> in a single pass. */
     private static List<Integer> toIntegerList(int[] values) {
         List<Integer> list = new ArrayList<>(values.length);
         for (int v : values) list.add(v);
-        return List.copyOf(list);
+        return list;
     }
 }

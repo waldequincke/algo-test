@@ -1,6 +1,8 @@
 # --- Gradle ---
 .gradle/
 build/
+spring-impl/build/
+spring-impl/.gradle/
 !gradle-wrapper.jar
 
 # --- Quarkus Specific ---
@@ -33,7 +35,6 @@ out/
 .classpath
 .project
 .factorypath
-bin/
 
 # --- System & OS ---
 .DS_Store
@@ -47,8 +48,31 @@ Thumbs.db
 *.keystore
 *.p12
 
+# --- Node.js ---
+nodejs-impl/node_modules/
+nodejs-impl/dist/
+nodejs-impl/coverage/
+nodejs-wt-impl/node_modules/
+nodejs-wt-impl/dist/
+nodejs-wt-impl/coverage/
+
+# --- Benchmark results ---
+results/
+
 # --- Temporary/Backup ---
 *.swp
 *.swo
 *.bak
 *.tmp
+
+# --- AWS / Secrets ---
+scripts/aws.env
+scripts/iam/
+scripts/__pycache__/
+
+# --- HTTP Client ---
+http/
+
+# --- Draft READMEs ---
+README-g.md
+README-previous.md

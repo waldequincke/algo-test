@@ -131,14 +131,14 @@ def get_metric(service_name: str, service_id: str, metric: str, stat: str,
 
 # ── Individual chart generators ───────────────────────────────────────────────
 
-def _save(fig, name: str):
-    path = OUT_DIR / name
+def _save(fig, name: str, prefix: str = ""):
+    path = OUT_DIR / f"{prefix}{name}"
     plt.savefig(path, dpi=150, bbox_inches="tight", facecolor=BG)
     plt.close(fig)
     print(f"  saved → {path.name}")
 
 
-def plot_cpu(start=None, end=None):
+def plot_cpu(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "CPUUtilization", "Average", start=start, end=end)
@@ -151,10 +151,10 @@ def plot_cpu(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "cpu-utilization.png")
+    _save(fig, "cpu-utilization.png", prefix)
 
 
-def plot_memory(start=None, end=None):
+def plot_memory(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "MemoryUtilization", "Average", start=start, end=end)
@@ -166,10 +166,10 @@ def plot_memory(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "memory-utilization.png")
+    _save(fig, "memory-utilization.png", prefix)
 
 
-def plot_active_instances(start=None, end=None):
+def plot_active_instances(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "ActiveInstances", "Maximum", start=start, end=end)
@@ -182,10 +182,10 @@ def plot_active_instances(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "active-instances.png")
+    _save(fig, "active-instances.png", prefix)
 
 
-def plot_concurrency(start=None, end=None):
+def plot_concurrency(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "Concurrency", "Maximum", start=start, end=end)
@@ -197,10 +197,10 @@ def plot_concurrency(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "concurrency.png")
+    _save(fig, "concurrency.png", prefix)
 
 
-def plot_request_count(start=None, end=None):
+def plot_request_count(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "Requests", "Sum", start=start, end=end)
@@ -212,10 +212,10 @@ def plot_request_count(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "request-count-overview.png")
+    _save(fig, "request-count-overview.png", prefix)
 
 
-def plot_latency_p99(start=None, end=None):
+def plot_latency_p99(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "RequestLatency", "p99",
@@ -228,10 +228,10 @@ def plot_latency_p99(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "request-latency.png")
+    _save(fig, "request-latency.png", prefix)
 
 
-def plot_2xx(start=None, end=None):
+def plot_2xx(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "2xxStatusResponses", "Sum", start=start, end=end)
@@ -243,10 +243,10 @@ def plot_2xx(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "2xx-response-count.png")
+    _save(fig, "2xx-response-count.png", prefix)
 
 
-def plot_4xx(start=None, end=None):
+def plot_4xx(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "4xxStatusResponses", "Sum", start=start, end=end)
@@ -258,10 +258,10 @@ def plot_4xx(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "4xx-response-count.png")
+    _save(fig, "4xx-response-count.png", prefix)
 
 
-def plot_5xx(start=None, end=None):
+def plot_5xx(start=None, end=None, prefix=""):
     fig, ax = plt.subplots(figsize=(12, 4))
     for label, (svc, sid) in SERVICES.items():
         ts, vals = get_metric(svc, sid, "5xxStatusResponses", "Sum", start=start, end=end)
@@ -274,7 +274,7 @@ def plot_5xx(start=None, end=None):
     ax.legend(loc="upper left", fontsize=7)
     _dark(fig, ax)
     plt.tight_layout()
-    _save(fig, "5xx-response-count-zero.png")
+    _save(fig, "5xx-response-count-zero.png", prefix)
 
 
 # ── CSV export of raw CloudWatch data ─────────────────────────────────────────
@@ -322,17 +322,18 @@ def fetch_cloudwatch_csv(start=None, end=None) -> Path:
 
 # ── Public entry point (importable from benchmark.py) ─────────────────────────
 
-def generate_all(start=None, end=None):
-    """Generate all charts + CSV. start/end are UTC datetimes; None = use LOOKBACK_MINUTES."""
-    plot_cpu(start, end)
-    plot_memory(start, end)
-    plot_active_instances(start, end)
-    plot_concurrency(start, end)
-    plot_request_count(start, end)
-    plot_latency_p99(start, end)
-    plot_2xx(start, end)
-    plot_4xx(start, end)
-    plot_5xx(start, end)
+def generate_all(start=None, end=None, prefix=""):
+    """Generate all charts + CSV. start/end are UTC datetimes; None = use LOOKBACK_MINUTES.
+    prefix is prepended to all output filenames (e.g. 'saturation_')."""
+    plot_cpu(start, end, prefix)
+    plot_memory(start, end, prefix)
+    plot_active_instances(start, end, prefix)
+    plot_concurrency(start, end, prefix)
+    plot_request_count(start, end, prefix)
+    plot_latency_p99(start, end, prefix)
+    plot_2xx(start, end, prefix)
+    plot_4xx(start, end, prefix)
+    plot_5xx(start, end, prefix)
     csv_path = fetch_cloudwatch_csv(start, end)
     print(f"  CSV  → {csv_path.name}")
 
@@ -340,8 +341,23 @@ def generate_all(start=None, end=None):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print(f"Fetching CloudWatch metrics (last {LOOKBACK_MINUTES} min) ...")
-    generate_all()
+    import sys as _sys
+    if "--saturation" in _sys.argv:
+        # Load time window saved by saturate.py
+        import json as _json
+        window_file = PROJECT_ROOT / "saturation_window.json"
+        if not window_file.exists():
+            print("⚠  saturation_window.json not found — using default lookback")
+            generate_all(prefix="saturation_")
+        else:
+            w = _json.loads(window_file.read_text())
+            start = datetime.datetime.fromisoformat(w["start"])
+            end   = datetime.datetime.fromisoformat(w["end"])
+            print(f"Fetching CloudWatch metrics for saturation window: {start} → {end}")
+            generate_all(start=start, end=end, prefix="saturation_")
+    else:
+        print(f"Fetching CloudWatch metrics (last {LOOKBACK_MINUTES} min) ...")
+        generate_all()
     print("Done.")
 
 

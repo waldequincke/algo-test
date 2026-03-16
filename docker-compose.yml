@@ -1,16 +1,86 @@
 services:
-  algo-service:
+
+  java-service:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: algo-service-corretto
+      dockerfile: java-impl/Dockerfile
+    container_name: algo-java
     ports:
       - "8080:8080"
     environment:
       - QUARKUS_PROFILE=prod
-      # JVM heap flags are set directly in the Dockerfile ENTRYPOINT (-Xms512m -Xmx512m)
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/q/health" ]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/q/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 30s
+
+  kotlin-service:
+    build:
+      context: .
+      dockerfile: kotlin-impl/Dockerfile
+    container_name: algo-kotlin
+    ports:
+      - "8081:8081"
+    environment:
+      - QUARKUS_PROFILE=prod
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/q/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  nodejs-service:
+    build:
+      context: ./nodejs-impl
+    container_name: algo-nodejs
+    ports:
+      - "8082:8082"
+    environment:
+      - PORT=8082
+      - NODE_ENV=production
+
+  nodejs-wt-service:
+    build:
+      context: ./nodejs-wt-impl
+    container_name: algo-nodejs-wt
+    ports:
+      - "8083:8083"
+    environment:
+      - PORT=8083
+      - NODE_ENV=production
+
+  spring-service:
+    build:
+      context: ./spring-impl
+    container_name: algo-spring
+    ports:
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  python-service:
+    build:
+      context: ./python-impl
+    container_name: algo-python
+    ports:
+      - "8085:8085"
+    environment:
+      - TREE_MAX_DEPTH=500
+      - TREE_MAX_NODES=10000
+
+  go-service:
+    build:
+      context: ./go-impl
+    container_name: algo-go
+    ports:
+      - "8086:8086"
+    environment:
+      - TREE_MAX_DEPTH=500
+      - TREE_MAX_NODES=10000
