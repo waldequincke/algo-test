@@ -461,4 +461,4 @@ graph LR
 ---
 
 **Author:** Waldemar Quincke
-*Focusing on high-performance distributed systems and cloud-native architectures.*
+
