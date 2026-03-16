@@ -58,6 +58,8 @@ nodejs-wt-impl/coverage/
 
 # --- Benchmark results ---
 results/
+heptathlon_*.csv
+heptathlon_*.json
 
 # --- Temporary/Backup ---
 *.swp
